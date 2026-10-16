@@ -21,6 +21,7 @@ import (
 	"github.com/iyear/gowidevine"
 	"github.com/iyear/gowidevine/widevinepb"
 
+	"chromecdm/internal/mp4"
 	"chromecdm/internal/version"
 )
 
@@ -376,9 +377,12 @@ func cmdDecrypt(device, licURL, pssh, inPath, outPath string,
 	// the file, so it silently fails on a license carrying more than one
 	// key. Select the key whose KID matches the file's tenc box instead,
 	// then feed DecryptMP4 that single key.
-	key, err := selectContentKey(inPath, keys)
+	key, matchedKID, err := mp4.SelectContentKey(inPath, contentKeys(keys), kidIndex(keys))
 	if err != nil {
 		fatal(err)
+	}
+	if matchedKID != "" {
+		fmt.Fprintf(os.Stderr, "[+] using key for KID %s\n", matchedKID)
 	}
 	if err := widevine.DecryptMP4(in, key, out); err != nil {
 		fatal(fmt.Errorf("decrypt: %w", err))
@@ -391,64 +395,23 @@ func cmdDecrypt(device, licURL, pssh, inPath, outPath string,
 	fmt.Fprintf(os.Stderr, "[+] in=%d bytes out=%d bytes\n", src.Size(), dst.Size())
 }
 
-// selectContentKey returns the key bytes whose KID appears in the MP4's
-// tenc box. Falls back to the first content key when the file carries no
-// recognizable KID (single-key content).
-func selectContentKey(path string, keys []*widevine.Key) ([]byte, error) {
-	var content [][]byte
-	kidIndex := map[string][]byte{}
-
+// contentKeys returns the raw bytes of every CONTENT key in the license.
+func contentKeys(keys []*widevine.Key) [][]byte {
+	var out [][]byte
 	for _, k := range keys {
-		if k.Type != widevinepb.License_KeyContainer_CONTENT {
-			continue
-		}
-		content = append(content, k.Key)
-		kidIndex[strings.ToLower(hex.EncodeToString(k.ID))] = k.Key
-	}
-	if len(content) == 0 {
-		return nil, fmt.Errorf("no content key in license")
-	}
-	if len(content) == 1 {
-		return content[0], nil
-	}
-
-	kids := tencKIDs(path)
-	for _, kid := range kids {
-		if key, ok := kidIndex[kid]; ok {
-			fmt.Fprintf(os.Stderr, "[+] using key for KID %s\n", kid)
-			return key, nil
+		if k.Type == widevinepb.License_KeyContainer_CONTENT {
+			out = append(out, k.Key)
 		}
 	}
-	if len(kids) > 0 {
-		return nil, fmt.Errorf(
-			"license has %d content keys but none match the file's KID (%s)",
-			len(content), strings.Join(kids, ", "))
-	}
-	// No KID in the file: fall back, but say so.
-	fmt.Fprintf(os.Stderr, "[!] file has no tenc KID; trying first of %d keys\n",
-		len(content))
-	return content[0], nil
+	return out
 }
 
-// tencKIDs finds every default_KID in the file's track encryption boxes.
-func tencKIDs(path string) []string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	seen := map[string]bool{}
-	for i := 0; i+36 <= len(data); i++ {
-		if data[i] != 't' || data[i+1] != 'e' || data[i+2] != 'n' ||
-			data[i+3] != 'c' {
-			continue
-		}
-		// tenc: size(4) type(4) version(1) flags(3) reserved(1)
-		//       isProtected(1) ivSize(1) KID(16)
-		kid := hex.EncodeToString(data[i+12 : i+28])
-		if !seen[kid] {
-			seen[kid] = true
-			out = append(out, kid)
+// kidIndex maps lowercased-hex KID -> key bytes, for content keys only.
+func kidIndex(keys []*widevine.Key) map[string][]byte {
+	out := map[string][]byte{}
+	for _, k := range keys {
+		if k.Type == widevinepb.License_KeyContainer_CONTENT {
+			out[strings.ToLower(hex.EncodeToString(k.ID))] = k.Key
 		}
 	}
 	return out
