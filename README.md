@@ -1,5 +1,8 @@
 # chromecdm
 
+[![ci](https://github.com/Yondaime-kun/chromecdm/actions/workflows/ci.yml/badge.svg)](https://github.com/Yondaime-kun/chromecdm/actions/workflows/ci.yml)
+[![release](https://github.com/Yondaime-kun/chromecdm/actions/workflows/release.yml/badge.svg)](https://github.com/Yondaime-kun/chromecdm/actions/workflows/release.yml)
+
 Widevine CDM toolkit. Two backends, one CLI.
 
 - **`wvd`** — a provisioned device file. Produces raw content keys.
@@ -26,11 +29,23 @@ $ wv cdp-feed -p "$PSSH" -i encrypted.mp4
 
 ## Install
 
+Download a binary from [Releases](https://github.com/Yondaime-kun/chromecdm/releases):
+
+```
+wv_<version>_<os>_<arch>          linux/darwin/freebsd
+wv_<version>_<os>_<arch>.exe      windows
+```
+
+Platforms: linux amd64/arm64/armv7/386, darwin amd64/arm64, windows
+amd64/arm64, freebsd amd64. Verify with the shipped `checksums.txt`.
+
+Or build from source:
+
 ```console
-$ git clone https://chromecdm
+$ git clone https://github.com/Yondaime-kun/chromecdm
 $ cd chromecdm
-$ go build -o wv ./cmd/wv
-$ go build -o chromecdm ./cmd/chromecdm
+$ make build          # bin/   for the host platform
+$ make release        # dist/  for every platform
 ```
 
 Go 1.22+. No cgo. The `cdp` backend needs a Chrome/Chromium build that
@@ -192,6 +207,7 @@ $ ffmpeg -v error -i ref.mp4 -f rawvideo -pix_fmt rgb24 - | sha256sum
 
 ## Documentation
 
+- [docs/versioning.md](docs/versioning.md) — semver rules, tagging, CI/CD.
 - [docs/security-levels.md](docs/security-levels.md) — L1/L2/L3, what is
   reachable and why.
 - [docs/cenc-testing.md](docs/cenc-testing.md) — building test vectors,
@@ -206,5 +222,7 @@ cmd/wv/               CLI
 cmd/chromecdm/        HTTP server
 internal/cdm/         .wvd loading, challenge, license parsing
 internal/cdp/         browser CDM backend over DevTools Protocol
+internal/version/     build identity, injected at link time
 internal/api/         HTTP handlers
+.github/workflows/    ci (test + matrix) and release (tag -> binaries)
 ```

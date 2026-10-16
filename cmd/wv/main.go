@@ -20,6 +20,8 @@ import (
 
 	"github.com/iyear/gowidevine"
 	"github.com/iyear/gowidevine/widevinepb"
+
+	"chromecdm/internal/version"
 )
 
 const usage = `wv - Widevine key retrieval and CENC decryption
@@ -60,6 +62,17 @@ func main() {
 		os.Exit(2)
 	}
 
+	// Handle -version before command dispatch: it takes no subcommand and
+	// os.Args[1] would otherwise be rejected as an unknown command.
+	if os.Args[1] == "-version" || os.Args[1] == "--version" {
+		fmt.Println("wv " + version.String())
+		return
+	}
+	if os.Args[1] == "version" {
+		fmt.Println("wv " + version.String())
+		return
+	}
+
 	var (
 		device   string
 		licURL   string
@@ -83,7 +96,13 @@ func main() {
 	fs.BoolVar(&insecure, "k", false, "skip TLS verify")
 	fs.StringVar(&browser, "B", "", "browser binary for cdp commands")
 	fs.IntVar(&cdpPort, "port", 0, "CDP port for cdp commands")
+	showVersion := fs.Bool("version", false, "print version and exit")
 	fs.Parse(os.Args[2:])
+
+	if *showVersion {
+		fmt.Println("wv " + version.String())
+		return
+	}
 
 	switch cmd {
 	case "info":

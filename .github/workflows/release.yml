@@ -1,0 +1,165 @@
+name: release
+
+# Triggered only by a SemVer 2.0.0 tag: vMAJOR.MINOR.PATCH with optional
+# -prerelease and +build metadata. Pre-release versions are published as
+# GitHub pre-releases automatically.
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+
+permissions:
+  contents: write
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      prerelease: ${{ steps.semver.outputs.prerelease }}
+    steps:
+      - name: Validate tag is semver
+        id: semver
+        run: |
+          TAG="$GITHUB_REF_NAME"
+          RE='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$'
+          if ! echo "$TAG" | grep -Eq "$RE"; then
+            echo "::error::tag $TAG is not valid semver (expected vX.Y.Z[-pre][+build])"
+            exit 1
+          fi
+
+          # The compiled version is the bare semver, without the "v" prefix
+          # and without build metadata (metadata does not affect precedence).
+          BARE="${TAG#v}"
+          VERSION="${BARE%%+*}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # A version carrying a pre-release identifier is a pre-release.
+          if echo "$BARE" | grep -q '-'; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "$TAG is a pre-release ($VERSION)"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "$TAG is a stable release ($VERSION)"
+          fi
+
+  build:
+    needs: [validate]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, goarm: '' }
+          - { goos: linux,   goarch: arm64, goarm: '' }
+          - { goos: linux,   goarch: arm,   goarm: '7' }
+          - { goos: linux,   goarch: '386', goarm: '' }
+          - { goos: darwin,  goarch: amd64, goarm: '' }
+          - { goos: darwin,  goarch: arm64, goarm: '' }
+          - { goos: windows, goarch: amd64, goarm: '' }
+          - { goos: windows, goarch: arm64, goarm: '' }
+          - { goos: freebsd, goarch: amd64, goarm: '' }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: '0'
+        run: |
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-s -w \
+            -X chromecdm/internal/version.Version=$VERSION \
+            -X chromecdm/internal/version.Commit=$COMMIT \
+            -X chromecdm/internal/version.Date=$DATE"
+
+          ext=""
+          [ "$GOOS" = windows ] && ext=".exe"
+          mkdir -p out
+          for cmd in wv chromecdm; do
+            go build -trimpath -ldflags "$LDFLAGS" \
+              -o "out/${cmd}_${VERSION}_${GOOS}_${GOARCH}${ext}" "./cmd/$cmd"
+          done
+          ls -la out
+
+      - name: Verify the version was injected
+        if: matrix.goos == 'linux' && matrix.goarch == 'amd64'
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          ./out/wv_${VERSION}_linux_amd64 -version
+          ./out/wv_${VERSION}_linux_amd64 -version | grep -q "$VERSION"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: [validate, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Collect and checksum
+        run: |
+          mkdir -p dist
+          find artifacts -type f -exec cp {} dist/ \;
+          ls -la dist
+          cd dist && sha256sum * > checksums.txt && cat checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          prerelease: ${{ needs.validate.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: |
+            dist/*
+          body: |
+            ## chromecdm ${{ needs.validate.outputs.version }}
+
+            Widevine CDM toolkit. Two backends:
+
+            - **`wv`** — CLI: fetch keys from a `.wvd` device, decrypt CENC
+              media, and drive a real browser CDM over the DevTools Protocol.
+            - **`chromecdm`** — HTTP API over the same device backend.
+
+            ### Platforms
+
+            | OS | Architectures |
+            |---|---|
+            | Linux | amd64, arm64, armv7, 386 |
+            | macOS | amd64, arm64 |
+            | Windows | amd64, arm64 |
+            | FreeBSD | amd64 |
+
+            Binaries are `wv_<version>_<os>_<arch>` and
+            `chromecdm_<version>_<os>_<arch>`. Verify downloads against
+            `checksums.txt`.
+
+            ### Verify
+
+            ```console
+            $ sha256sum -c checksums.txt
+            $ ./wv_${{ needs.validate.outputs.version }}_linux_amd64 -version
+            ```
+
+            Versioning follows [Semantic Versioning 2.0.0](https://semver.org).

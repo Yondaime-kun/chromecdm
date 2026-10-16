@@ -1,0 +1,111 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags-ignore: ['**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  # SemVer 2.0.0 tag validation, so a malformed tag never reaches a release.
+  semver:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate HEAD tag is semver (if tagged)
+        id: check
+        run: |
+          # Mirrors https://semver.org/#is-there-a-suggested-regular-expression-regex-to-check-a-semver-string
+          RE='^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(\.(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*)?(\+[0-9a-zA-Z-]+(\.[0-9a-zA-Z-]+)*)?$'
+          TAG=$(git describe --tags --exact-match 2>/dev/null || true)
+          if [ -n "$TAG" ]; then
+            echo "$TAG" | grep -Eq "$RE" || { echo "::error::$TAG is not valid semver"; exit 1; }
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+            echo "tag $TAG is valid semver"
+          else
+            echo "no exact tag on HEAD; skipping"
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          fmt=$(gofmt -l cmd internal)
+          if [ -n "$fmt" ]; then echo "::error::not gofmt'd: $fmt"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: test
+        run: go test ./... -race -count=1
+      - name: build
+        run: go build ./...
+
+  # Cross-compile the whole matrix on every push, so a broken platform
+  # combination fails CI rather than the release.
+  build-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64, goarm: '' }
+          - { goos: linux,   goarch: arm64, goarm: '' }
+          - { goos: linux,   goarch: arm,   goarm: '7' }
+          - { goos: linux,   goarch: '386', goarm: '' }
+          - { goos: darwin,  goarch: amd64, goarm: '' }
+          - { goos: darwin,  goarch: arm64, goarm: '' }
+          - { goos: windows, goarch: amd64, goarm: '' }
+          - { goos: windows, goarch: arm64, goarm: '' }
+          - { goos: freebsd, goarch: amd64, goarm: '' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build ${{ matrix.goos }}/${{ matrix.goarch }}
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+          CGO_ENABLED: '0'
+        run: |
+          ext=""
+          [ "$GOOS" = windows ] && ext=".exe"
+          go build -trimpath -o /tmp/wv$ext ./cmd/wv
+          go build -trimpath -o /tmp/chromecdm$ext ./cmd/chromecdm
+
+  # The .wvd backend is pure Go and fully testable in CI. The browser
+  # backend needs Chrome with a Widevine CDM, which is covered by
+  # release.yml on a runner that has one.
+  verify:
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: version flag works
+        run: |
+          go build -trimpath \
+            -ldflags "-X chromecdm/internal/version.Version=1.0.0 -X chromecdm/internal/version.Commit=ci" \
+            -o /tmp/wv ./cmd/wv
+          /tmp/wv -version
+          /tmp/wv -version | grep -q '1.0.0'

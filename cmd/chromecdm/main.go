@@ -19,6 +19,7 @@ import (
 
 	"chromecdm/internal/api"
 	"chromecdm/internal/cdm"
+	"chromecdm/internal/version"
 )
 
 func main() {
@@ -27,7 +28,13 @@ func main() {
 	licenseURL := flag.String("license", envOr("LICENSE_URL", ""),
 		"license server URL (or LICENSE_URL env)")
 	addr := flag.String("addr", envOr("LISTEN_ADDR", ":8443"), "listen address")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		log.Printf("chromecdm %s", version.String())
+		return
+	}
 
 	dev, err := cdm.Load(*devicePath)
 	if err != nil {
