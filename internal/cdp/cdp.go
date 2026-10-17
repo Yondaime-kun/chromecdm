@@ -14,6 +14,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,30 +38,77 @@ type Backend struct {
 	profile string
 }
 
-// FindBrowser returns the first usable chromium-family binary, preferring
-// the Playwright Chromium build that ships a Widevine CDM.
+// FindBrowser returns the best available chromium-family binary.
+//
+// Several Chrome builds can coexist, and they are not equivalent for DRM:
+// an older build can ship a Widevine CDM version the license server does
+// not recognize, which surfaces as the server rejecting an otherwise valid
+// challenge. So this collects every candidate and picks the highest
+// version rather than the first hit, and it looks where Chrome actually
+// gets installed, not only under the Playwright cache.
 func FindBrowser() (string, error) {
 	home, _ := os.UserHomeDir()
 	globs := []string{
+		// Chrome-for-Testing downloads (newest builds usually live here).
+		filepath.Join(home, ".agent-browser/browsers/chrome-*/chrome"),
+		// Playwright's managed browsers, both layouts and both roots.
 		filepath.Join(home, ".cache/ms-playwright/chromium-*/chrome-linux64/chrome"),
 		filepath.Join(home, ".cache/ms-playwright/chromium-*/chrome-linux/chrome"),
 		"/opt/ms-playwright/chromium-*/chrome-linux64/chrome",
+		"/opt/ms-playwright/chromium-*/chrome-linux/chrome",
+		"/usr/bin/google-chrome*",
+		"/usr/bin/chromium*",
 	}
+
+	var candidates []string
 	for _, g := range globs {
 		if m, _ := filepath.Glob(g); len(m) > 0 {
-			return m[len(m)-1], nil
+			candidates = append(candidates, m...)
 		}
 	}
 	for _, name := range []string{
-		"google-chrome", "google-chrome-stable", "chromium",
-		"chromium-browser", "chrome",
+		"google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
 	} {
 		if p, err := exec.LookPath(name); err == nil {
-			return p, nil
+			candidates = append(candidates, p)
 		}
 	}
-	return "", fmt.Errorf("no chrome/chromium found; set -browser explicitly")
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no chrome/chromium found; set -B explicitly")
+	}
+
+	// Highest version wins. A build that fails to report its version sorts
+	// last rather than aborting the search.
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return BrowserVersion(candidates[i]) > BrowserVersion(candidates[j])
+	})
+	return candidates[0], nil
 }
+
+// BrowserVersion reports the numeric version of a chrome binary, or "" when
+// it cannot be determined. Only the leading dotted number is used, so the
+// result compares lexically after zero-padding.
+func BrowserVersion(path string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").Output()
+	if err != nil {
+		return ""
+	}
+	// "Google Chrome for Testing 155.0.8059.84" / "Chromium 145.0.7632.6"
+	m := versionRe.FindString(string(out))
+	if m == "" {
+		return ""
+	}
+	// Zero-pad each component so a lexical compare is a numeric compare.
+	parts := strings.Split(m, ".")
+	for i, p := range parts {
+		parts[i] = fmt.Sprintf("%06s", p)
+	}
+	return strings.Join(parts, ".")
+}
+
+var versionRe = regexp.MustCompile(`\d+\.\d+\.\d+\.\d+`)
 
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")

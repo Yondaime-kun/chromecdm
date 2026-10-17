@@ -76,6 +76,20 @@ That is the browser's own CDM reporting itself. If you see a different
 
 ## Notes and gotchas
 
+- **Browser version matters.** Several Chrome builds can coexist on a
+  machine, and their bundled Widevine CDM versions differ. An older CDM
+  can have its challenge rejected by a license server that accepts a
+  newer one — the failure looks like `ACCESS_DENIED` from the server, or a
+  rejected `update()`, even though the code and the PSSH are correct. Two
+  builds on one machine that behaved differently against the same server:
+
+  ```
+  Chrome 145.0.7632.6  CDM 4.10.2934.0  -> ACCESS_DENIED
+  Chrome 155.0.8059.84 CDM 4.10.3112.02  -> update-ok, 5 keys usable
+  ```
+
+  `cdp` commands therefore select the highest installed version rather
+  than the first one found. Pin a specific build with `-B /path/to/chrome`.
 - The harness uses a self-signed certificate. Chrome needs
   `--ignore-certificate-errors` and `--allow-insecure-localhost`, otherwise
   the page is not a usable secure context and the EME API is missing.
