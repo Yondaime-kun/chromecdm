@@ -123,7 +123,7 @@ func (s *Server) open(c *gin.Context) {
 		"status":        sess.Status,
 		"challenge_len": len(sess.Challenge),
 		"license_len":   len(body),
-		"key_count":     len(keys),
+		"key_count":     contentKeyCount(keys),
 		"keys":          keysToJSON(keys),
 		"keys_text":     keysText(keys),
 	})
@@ -142,7 +142,7 @@ func (s *Server) getSession(c *gin.Context) {
 		"session_id":    sess.ID,
 		"status":        sess.Status,
 		"challenge_len": len(sess.Challenge),
-		"key_count":     len(sess.Keys),
+		"key_count":     contentKeyCount(sess.Keys),
 		"keys":          keysToJSON(sess.Keys),
 		"keys_text":     keysText(sess.Keys),
 		"created_at":    sess.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
@@ -160,7 +160,7 @@ func (s *Server) getKeys(c *gin.Context) {
 	defer sess.mu.Unlock()
 	c.JSON(http.StatusOK, gin.H{
 		"session_id": sess.ID,
-		"key_count":  len(sess.Keys),
+		"key_count":  contentKeyCount(sess.Keys),
 		"keys":       keysToJSON(sess.Keys),
 		"keys_text":  keysText(sess.Keys),
 	})
@@ -226,7 +226,7 @@ func (s *Server) update(c *gin.Context) {
 	sess.mu.Unlock()
 	c.JSON(http.StatusOK, gin.H{
 		"session_id": sess.ID,
-		"key_count":  len(keys),
+		"key_count":  contentKeyCount(keys),
 		"keys":       keysToJSON(keys),
 		"keys_text":  keysText(keys),
 	})

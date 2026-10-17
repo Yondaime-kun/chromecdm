@@ -12,10 +12,17 @@ func decodeB64(s string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(strings.TrimSpace(s))
 }
 
-// keysToJSON renders keys with hex and base64 forms.
+// keysToJSON renders content keys with hex and base64 forms.
+//
+// Signing keys are excluded: they carry no KID and are not content keys, so
+// including them puts an entry with an empty kid in every response and
+// breaks anything that pipes these into a decryption tool.
 func keysToJSON(keys []cdm.Key) []map[string]string {
 	out := make([]map[string]string, 0, len(keys))
 	for _, k := range keys {
+		if strings.EqualFold(k.Type, "SIGNING") {
+			continue
+		}
 		m := map[string]string{
 			"type": k.Type,
 			"kid":  k.ID,
@@ -34,6 +41,18 @@ func keysToJSON(keys []cdm.Key) []map[string]string {
 		out = append(out, m)
 	}
 	return out
+}
+
+// contentKeyCount is what key_count reports: content keys only, matching
+// the entries actually rendered.
+func contentKeyCount(keys []cdm.Key) int {
+	n := 0
+	for _, k := range keys {
+		if !strings.EqualFold(k.Type, "SIGNING") {
+			n++
+		}
+	}
+	return n
 }
 
 // keysText renders content keys as "KID:KEY" lines, one per line.
