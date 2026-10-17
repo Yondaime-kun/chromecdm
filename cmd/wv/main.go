@@ -37,6 +37,8 @@ usage:
   wv cdp-keys   -l <license-url> -p <pssh-b64>        full EME exchange
   wv cdp-feed   -l <license-url> -p <pssh-b64> -i <enc.mp4>
                                                       decrypt through the CDM
+  wv cdp-pair   -d <device.wvd> -l <license-url> -p <pssh-b64> -i <enc.mp4>
+                                                      KID:KEY from both backends
 
 flags:
   -d  path to a .wvd Widevine device file
@@ -123,6 +125,9 @@ func main() {
 	case "cdp-feed":
 		runCDPFeed(cdpOptions{browser: browser, port: cdpPort,
 			psshm: psshArg, licURL: licURL, hdrs: headers}, inPath)
+	case "cdp-pair":
+		runPairedKeys(cdpOptions{browser: browser, port: cdpPort,
+			psshm: psshArg, licURL: licURL, hdrs: headers}, inPath, device)
 	case "help", "-h", "--help":
 		fmt.Print(usage)
 	default:

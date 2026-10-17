@@ -202,12 +202,16 @@ func runCDPFeed(o cdpOptions, inPath string) {
 
 	usable := 0
 	for kid, status := range keys {
-		fmt.Printf("%s:%s\n", kid, status)
+		// An explicit label, not "KID:status". A colon here reads as
+		// "KID:KEY" at a glance, which is how a status gets mistaken for a
+		// content key. The browser never exposes key bytes.
+		fmt.Printf("KID %s  status=%s\n", kid, status)
 		if status == "usable" {
 			usable++
 		}
 	}
-	fmt.Fprintf(os.Stderr, "[+] %d key(s), %d usable\n", len(keys), usable)
+	fmt.Fprintf(os.Stderr, "[+] %d key(s), %d usable  (KID + status only; the browser never exposes key bytes)\n",
+		len(keys), usable)
 	fmt.Fprintf(os.Stderr, "[+] playback: %.2fs, readyState %d\n", out.Time, out.Ready)
 	if usable == 0 {
 		os.Exit(1)

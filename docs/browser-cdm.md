@@ -100,7 +100,22 @@ That is the browser's own CDM reporting itself. If you see a different
   different representation yields a license the CDM rejects, because the
   KIDs do not line up.
 - The keys a browser CDM holds are never exposed to page script. For raw
-  key bytes, use the `.wvd` backend.
+  key bytes, use the `.wvd` backend. This was verified, not assumed:
+
+  | route | result |
+  |---|---|
+  | `keyStatuses` iteration | KID + status only |
+  | property introspection of the live session | `sessionId, expiration, closed, keyStatuses, onkeystatuseschange, onmessage, close, generateRequest, load, remove, update, addEventListener, dispatchEvent, removeEventListener, when` — no key accessor |
+  | scan of the `window` object graph to depth 4 for the 16 key bytes | absent |
+  | scan of 85 live Chrome processes (browser, renderer, utility, gpu) during active decryption, ~41k regions per pass, 12 passes, raw + hex + HEX encodings | 0 regions held the key; a control string was found 136 times, so the scan works |
+  | `JSON.stringify(session.keyStatuses)` | `{}` |
+
+  The key never enters readable memory, even while frames are being
+  decrypted. It is not transient — it is simply never there as plaintext.
+
+- `KID:status` output reads like `KID:KEY` at a glance. The CLI prints
+  `KID <hex>  status=<value>` for that reason. Use `cdp-pair` to get real
+  `KID:KEY` lines, joined from both backends.
 - `keyStatuses` can be read directly off the live session, which is useful
   when the event fires after your polling loop has already finished:
 

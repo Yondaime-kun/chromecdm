@@ -61,6 +61,8 @@ wv decrypt -d <device.wvd> -l <url> -p <pssh> -i in.mp4 -o out.mp4
 wv cdp       [-B <browser>] -p <pssh>         challenge from a browser CDM
 wv cdp-keys  -l <url> -p <pssh>               EME handshake + license
 wv cdp-feed  -l <url> -p <pssh> -i <enc.mp4>  decrypt through the CDM
+wv cdp-pair  -d <wvd> -l <url> -p <pssh> -i <enc.mp4>
+                                             KID:KEY from both backends
 ```
 
 Common flags:
@@ -128,11 +130,41 @@ $ wv cdp-feed -i enc.mp4    # + feed the stream and let it decrypt
 
 `cdp-feed` is the strong one: it appends the encrypted segments through
 Media Source Extensions, so the CDM has to actually decrypt for playback
-to advance. The key statuses it prints (`usable`) come from the CDM itself
-and only appear when decryption succeeds.
+to advance. Key status only appears when decryption succeeds, so a non-empty
+`usable` set is proof the CDM is working.
+
+That output is **KID + status, not key material**:
+
+```
+KID 800aacaa522958ae888062b5695db6bf  status=usable
+```
 
 A browser CDM never exposes raw key bytes to page script — that is by
-design. Use the `wvd` backend when you need the keys themselves.
+design, and no amount of script access changes it. Use the `wvd` backend
+when you need the keys themselves.
+
+### Both at once: `cdp-pair`
+
+Neither backend alone gives a verified, complete answer. `cdp-pair` runs
+both and joins them on KID:
+
+- the **browser** proves the KIDs are live, because the CDM only reports
+  `usable` after it decrypts;
+- the **device** supplies the raw key bytes.
+
+```console
+$ wv cdp-pair -d device.wvd -l "$URL" -p "$PSSH" -i enc.mp4
+[1/2] browser CDM (KID + status)
+      5 KID(s) confirmed: the CDM decrypted with them
+[2/2] .wvd device (key bytes)
+      5 content key(s) from the license
+800aacaa522958ae888062b5695db6bf:775dbf7289c4cc5847becd571f536ff2
+...
+[+] 5 KID(s): 5 with a key and confirmed by the CDM
+```
+
+stdout is `KID:KEY` — the format `mp4decrypt` reads — so it pipes directly.
+KIDs the device cannot cover stay out of stdout and are reported on stderr.
 
 ## HTTP API
 
