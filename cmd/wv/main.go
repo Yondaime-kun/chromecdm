@@ -199,7 +199,9 @@ func cmdPssh(path string) {
 		fatal(fmt.Errorf("no pssh box found in %s", path))
 	}
 	for _, b := range boxes {
-		sysID := hex.EncodeToString(b[8:24])
+		// pssh layout: size(4) type(4) version(1) flags(3) systemID(16)
+		// so the system ID starts at offset 12, not 8.
+		sysID := hex.EncodeToString(b[12:28])
 		label := "other"
 		if sysID == widevine.WidevineSystemID {
 			label = "WIDEVINE"
@@ -212,7 +214,7 @@ func cmdPssh(path string) {
 // findPSSH scans for ISO BMFF pssh boxes and returns the Widevine ones.
 func findPSSH(data []byte) [][]byte {
 	var out [][]byte
-	for i := 0; i+32 < len(data); i++ {
+	for i := 4; i+28 <= len(data); i++ {
 		if data[i] != 'p' || data[i+1] != 's' || data[i+2] != 's' || data[i+3] != 'h' {
 			continue
 		}
@@ -226,8 +228,12 @@ func findPSSH(data []byte) [][]byte {
 			continue
 		}
 		box := data[i-4 : i-4+size]
-		// Widevine system id at offset 8..24
-		if hex.EncodeToString(box[8:24]) == widevine.WidevineSystemID {
+		if len(box) < 28 {
+			continue
+		}
+		// pssh layout: size(4) type(4) version(1) flags(3) systemID(16).
+		// The system ID starts at offset 12.
+		if hex.EncodeToString(box[12:28]) == widevine.WidevineSystemID {
 			out = append(out, box)
 		}
 	}

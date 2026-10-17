@@ -81,7 +81,7 @@ type Result struct {
 type Session struct {
 	page *Page
 	auth *Backend
-	h    *harness
+	h    *Harness
 }
 
 // NewSession launches a browser, opens a page, and serves it a local
@@ -96,7 +96,7 @@ func NewSession(ctx context.Context, opt Options) (*Session, *Page, error) {
 		b.Close()
 		return nil, nil, err
 	}
-	srv, err := newHarness()
+	srv, err := NewHarness()
 	if err != nil {
 		page.Close()
 		b.Close()
@@ -113,7 +113,7 @@ func NewSession(ctx context.Context, opt Options) (*Session, *Page, error) {
 
 // SetLicense tells the harness where to relay challenges.
 func (s *Session) SetLicense(url string, headers map[string]string) {
-	s.h.setLicense(url, headers)
+	s.h.SetLicense(url, headers)
 }
 
 // Close shuts down the browser and the harness.

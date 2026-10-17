@@ -24,7 +24,9 @@ const defaultLicenseURL = "https://cwip-shaka-proxy.appspot.com/no_auth"
 // page the CDM runs on cannot be about:blank or a data: URL. It also
 // relays license challenges, because page script cannot POST cross-origin
 // to a license server without CORS.
-type harness struct {
+// Harness is a local HTTPS origin for EME pages. Exported so other
+// browser backends can share one implementation.
+type Harness struct {
 	srv  *http.Server
 	url  string
 	stop func()
@@ -36,7 +38,8 @@ type harness struct {
 
 const harnessBody = `<!doctype html><html><body></body></html>`
 
-func newHarness() (*harness, error) {
+// NewHarness starts a local HTTPS origin.
+func NewHarness() (*Harness, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -47,7 +50,7 @@ func newHarness() (*harness, error) {
 		return nil, err
 	}
 
-	h := &harness{licURL: defaultLicenseURL, headers: map[string]string{}}
+	h := &Harness{licURL: defaultLicenseURL, headers: map[string]string{}}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -68,8 +71,17 @@ func newHarness() (*harness, error) {
 	return h, nil
 }
 
-// setLicense configures where challenges are relayed, plus extra headers.
-func (h *harness) setLicense(url string, headers map[string]string) {
+func (h *Harness) URL() string { return h.url }
+
+// Close stops the origin.
+func (h *Harness) Close() {
+	if h.stop != nil {
+		h.stop()
+	}
+}
+
+// SetLicense configures where challenges are relayed, plus extra headers.
+func (h *Harness) SetLicense(url string, headers map[string]string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if url != "" {
@@ -78,7 +90,7 @@ func (h *harness) setLicense(url string, headers map[string]string) {
 	h.headers = headers
 }
 
-func (h *harness) handleLicense(w http.ResponseWriter, r *http.Request) {
+func (h *Harness) handleLicense(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method", http.StatusMethodNotAllowed)
 		return
